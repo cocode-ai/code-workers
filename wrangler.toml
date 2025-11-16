@@ -1,0 +1,26 @@
+name = "codede-ai-studio"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "CODE_AI_USERS"
+id = "0cf336b44c3f4a6088eb9ff599b31af8"
+
+[[r2_buckets]]
+binding = "USER_WORKSPACES"
+bucket_name = "code-ai-workspaces"
+
+# Tambahkan untuk Pages integration
+[env.production.vars]
+CF_PAGES_URL = "https://your-preview-site.pages.dev"
+CF_API_TOKEN = "${CF_API_TOKEN}"
+
+[triggers]
+crons = ["0 * * * *"]  # Cleanup hourly

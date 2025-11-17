@@ -22,10 +22,5 @@ id = "80cd14d7c8d440b7b53fa037d030d407"
 binding = "USER_WORKSPACES"
 bucket_name = "cocode-ai-workspaces"
 
-# Tambahkan untuk Pages integration
-[env.production.vars]
-CF_PAGES_URL = "https://your-preview-site.pages.dev"
-CF_API_TOKEN = "${CF_API_TOKEN}"
-
 [triggers]
 crons = ["0 * * * *"]  # Cleanup hourly

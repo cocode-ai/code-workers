@@ -18,6 +18,10 @@ export default {
       '/api/load-workspace': handleLoadWorkspace,
       '/api/user-projects': handleUserProjects,
       '/api/deploy-preview': handleDeployPreview
+  '/api/create-preview': handleCreatePreview,
+  '/api/preview-status': handlePreviewStatus,
+  '/api/deploy-preview': handleDeployPreview,
+  '/api/list-previews': handleListPreviews
     };
 
     const handler = routes[path];
@@ -439,6 +443,215 @@ async function parseProjectStructure(rawResponse, framework) {
     }
   };
 }
+// Preview functionality
+async function handleCreatePreview(request, env) {
+  try {
+    const { userId, projectId, branch = 'main' } = await request.json();
+    
+    if (!userId || !projectId) {
+      return jsonResponse({ error: 'User ID and Project ID required' }, 400);
+    }
+
+    // Get project data from R2
+    const projectData = await env.USER_WORKSPACES.get(`projects/${projectId}/project.json`, 'json');
+    if (!projectData) {
+      return jsonResponse({ error: 'Project not found' }, 404);
+    }
+
+    // Create preview deployment
+    const previewResult = await createCloudflarePagesPreview(env, userId, projectId, projectData);
+    
+    // Save preview metadata
+    await savePreviewMetadata(env, userId, projectId, previewResult);
+
+    return jsonResponse({
+      previewId: previewResult.id,
+      url: previewResult.url,
+      status: 'building',
+      createdAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Create preview error:', error);
+    return jsonResponse({ error: 'Failed to create preview' }, 500);
+  }
+}
+
+async function createCloudflarePagesPreview(env, userId, projectId, projectData) {
+  // Generate unique preview ID
+  const previewId = `preview_${projectId}_${Date.now()}`;
+  
+  // Upload project files to R2 for Pages to access
+  await uploadProjectToPreviewBucket(env, previewId, projectData);
+  
+  // Simulate deployment process
+  // In real implementation, you'd use Cloudflare Pages API
+  const previewUrl = `https://${previewId}.code-ai-studio.pages.dev`;
+  
+  return {
+    id: previewId,
+    url: previewUrl,
+    status: 'deploying'
+  };
+}
+
+async function uploadProjectToPreviewBucket(env, previewId, projectData) {
+  const files = projectData.project?.structure || [];
+  
+  for (const file of files) {
+    if (file.type === 'file') {
+      await env.USER_WORKSPACES.put(
+        `previews/${previewId}/${file.path}`, 
+        file.content
+      );
+    }
+  }
+  
+  // Create special configuration files for Pages
+  const config = {
+    build: {
+      command: 'npm run build',
+      publish: '/dist'
+    },
+    environment: {
+      NODE_VERSION: '18'
+    }
+  };
+  
+  await env.USER_WORKSPACES.put(
+    `previews/${previewId}/_config.json`,
+    JSON.stringify(config)
+  );
+}
+
+// Virtual preview system - no deployment needed
+async function handleDeployPreview(request, env) {
+  try {
+    const { userId, projectId, files } = await request.json();
+    
+    // Create virtual preview session
+    const previewSession = await createVirtualPreview(env, userId, projectId, files);
+    
+    return jsonResponse({
+      sessionId: previewSession.id,
+      previewUrl: `/preview/${previewSession.id}`,
+      expiresAt: previewSession.expiresAt
+    });
+    
+  } catch (error) {
+    return jsonResponse({ error: 'Preview deployment failed' }, 500);
+  }
+}
+
+// Virtual preview handler
+async function handleVirtualPreview(request, env, ctx) {
+  const url = new URL(request.url);
+  const sessionId = url.pathname.split('/preview/')[1];
+  
+  if (!sessionId) {
+    return new Response('Preview not found', { status: 404 });
+  }
+  
+  // Get preview data
+  const previewData = await env.USER_WORKSPACES.get(`previews/${sessionId}`, 'json');
+  if (!previewData) {
+    return new Response('Preview expired or not found', { status: 404 });
+  }
+  
+  // Serve the preview HTML
+  const html = generatePreviewHTML(previewData);
+  
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html',
+      'Cache-Control': 'no-cache'
+    }
+  });
+}
+
+function generatePreviewHTML(previewData) {
+  const { files, project } = previewData;
+  
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Preview - ${project.name}</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            margin: 0; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .preview-container {
+            width: 100%;
+            height: 100vh;
+            border: none;
+        }
+        .preview-header {
+            background: #f5f5f5;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="preview-header">
+        🔄 Live Preview - ${project.name} | Built with Code AI Studio
+    </div>
+    <iframe 
+        class="preview-container" 
+        id="preview-frame"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        src="about:blank"
+    ></iframe>
+    
+    <script>
+        // Inject project files into iframe
+        const frame = document.getElementById('preview-frame');
+        const projectFiles = ${JSON.stringify(files)};
+        
+        frame.onload = function() {
+            const frameDoc = frame.contentDocument || frame.contentWindow.document;
+            
+            // Find and execute main entry point
+            const htmlFile = projectFiles.find(f => f.path.endsWith('.html'));
+            const jsFiles = projectFiles.filter(f => f.path.endsWith('.js'));
+            const cssFiles = projectFiles.filter(f => f.path.endsWith('.css'));
+            
+            if (htmlFile) {
+                frameDoc.write(htmlFile.content);
+            } else {
+                // Generate basic HTML structure
+                frameDoc.write('<html><head><title>Preview</title></head><body><div id="root"></div></body></html>');
+            }
+            
+            // Inject CSS
+            cssFiles.forEach(cssFile => {
+                const style = frameDoc.createElement('style');
+                style.textContent = cssFile.content;
+                frameDoc.head.appendChild(style);
+            });
+            
+            // Inject and execute JS
+            jsFiles.forEach(jsFile => {
+                const script = frameDoc.createElement('script');
+                script.textContent = jsFile.content;
+                frameDoc.body.appendChild(script);
+            });
+        };
+        
+        // Load initial empty document
+        frame.contentWindow.document.open();
+        frame.contentWindow.document.close();
+    </script>
+</body>
+</html>
+  `;
+}
 
 async function parseFixResponse(rawResponse) {
   const codeMatch = rawResponse.match(/(?:```|`)(?:\w+)?\s*\n([\s\S]*?)(?:```|`)/);
@@ -465,4 +678,132 @@ function getExtensionFromLanguage(lang) {
   };
   
   return extensions[lang] || 'txt';
+}
+
+// Specialized Next.js preview
+async function handleNextJSPreview(request, env) {
+  const { userId, projectId, entryFile = 'app/page.tsx' } = await request.json();
+  
+  const project = await env.USER_WORKSPACES.get(`projects/${projectId}/project.json`, 'json');
+  const files = project.project.structure;
+  
+  // Generate Next.js specific preview
+  const previewHTML = generateNextJSPreviewHTML(files, entryFile);
+  
+  const previewId = `nextjs_${projectId}_${Date.now()}`;
+  await env.USER_WORKSPACES.put(
+    `previews/${previewId}`,
+    JSON.stringify({
+      type: 'nextjs',
+      files,
+      entryFile,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+    })
+  );
+  
+  return jsonResponse({
+    previewId,
+    previewUrl: `${new URL(request.url).origin}/preview/${previewId}`,
+    type: 'nextjs',
+    expiresIn: '24 hours'
+  });
+}
+
+function generateNextJSPreviewHTML(files, entryFile) {
+  const reactContent = files.find(f => f.path === entryFile)?.content || 'export default function Page() { return <div>Hello World</div> }';
+  
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Next.js Preview</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        .preview-container { padding: 20px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        ${extractComponents(files)}
+        
+        ${reactContent}
+        
+        // Render the component
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(Page));
+    </script>
+</body>
+</html>
+  `;
+}
+
+async function handlePreviewStatus(request, env) {
+  const url = new URL(request.url);
+  const previewId = url.searchParams.get('previewId');
+  
+  if (!previewId) {
+    return jsonResponse({ error: 'Preview ID required' }, 400);
+  }
+  
+  const previewData = await env.USER_WORKSPACES.get(`previews/${previewId}`, 'json');
+  
+  if (!previewData) {
+    return jsonResponse({ error: 'Preview not found' }, 404);
+  }
+  
+  return jsonResponse({
+    previewId,
+    status: 'active',
+    url: `${new URL(request.url).origin}/preview/${previewId}`,
+    createdAt: previewData.createdAt,
+    expiresAt: previewData.expiresAt
+  });
+}
+
+async function handleListPreviews(request, env) {
+  const userId = request.headers.get('X-User-ID');
+  
+  if (!userId) {
+    return jsonResponse({ error: 'User ID required' }, 400);
+  }
+  
+  // List all previews for user
+  const list = await env.USER_WORKSPACES.list({ prefix: `user-previews/${userId}/` });
+  const previews = [];
+  
+  for (const key of list.keys) {
+    const preview = await env.USER_WORKSPACES.get(key.name, 'json');
+    if (preview) {
+      previews.push(preview);
+    }
+  }
+  
+  return jsonResponse({ previews });
+}
+
+// Helper functions
+async function savePreviewMetadata(env, userId, projectId, previewData) {
+  const key = `user-previews/${userId}/${previewData.id}`;
+  await env.USER_WORKSPACES.put(key, JSON.stringify({
+    ...previewData,
+    userId,
+    projectId,
+    createdAt: new Date().toISOString()
+  }));
+}
+
+function extractComponents(files) {
+  let components = '';
+  files.forEach(file => {
+    if (file.path.endsWith('.tsx') || file.path.endsWith('.jsx')) {
+      components += file.content + '\n\n';
+    }
+  });
+  return components;
 }

@@ -22,11 +22,11 @@ export default {
       '/api/save-workspace': handleSaveWorkspace,
       '/api/load-workspace': handleLoadWorkspace,
       '/api/user-projects': handleUserProjects,
-      '/api/deploy-preview': handleDeployPreview
-  '/api/create-preview': handleCreatePreview,
-  '/api/preview-status': handlePreviewStatus,
-  '/api/deploy-preview': handleDeployPreview,
-  '/api/list-previews': handleListPreviews
+      '/api/deploy-preview': handleDeployPreview,
+      '/api/create-preview': handleCreatePreview,
+      '/api/preview-status': handlePreviewStatus,
+      '/api/deploy-preview': handleDeployPreview,
+      '/api/list-previews': handleListPreviews
     };
 
     const handler = routes[path];

@@ -4,6 +4,11 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Handle preview routes
+    if (path.startsWith('/preview/')) {
+      return handleVirtualPreview(request, env, ctx);
+    }
+
     // CORS handling
     if (request.method === 'OPTIONS') {
       return handleCORS();

@@ -15,7 +15,7 @@ MAX_PROJECTS_PER_USER = 5
 MAX_FILE_SIZE = 10485760  # 10MB
 
 [[kv_namespaces]]
-binding = "COCODE_AI_USERS"
+binding = "CODE_AI_USERS"
 id = "80cd14d7c8d440b7b53fa037d030d407"
 
 [[r2_buckets]]

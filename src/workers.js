@@ -111,7 +111,7 @@ async function handleChat(request, env) {
     // Log interaction untuk analytics
     await logUserInteraction(env, userId, 'chat', { projectType, messageLength: message.length });
 
-    const response = await env.AI.run('@cf/deepseek-ai/deepseek-coder-6.7b-instruct', {
+    const response = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
       messages,
       max_tokens: 4000,
       temperature: 0.7
@@ -173,7 +173,7 @@ Berikan struktur project lengkap dalam format JSON:
 Gunakan best practices untuk ${framework} dan pastikan kode modern dan efisien.
     `;
 
-    const response = await env.AI.run('@cf/deepseek-ai/deepseek-coder-6.7b-instruct', {
+    const response = await env.AI.run('@cf/google/gemma-3-12b-it', {
       messages: [{ role: "user", content: projectPrompt }],
       max_tokens: 6000
     });
@@ -261,7 +261,7 @@ Format response JSON:
 }
     `;
 
-    const response = await env.AI.run('@cf/deepseek-ai/deepseek-coder-6.7b-instruct', {
+    const response = await env.AI.run('@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', {
       messages: [{ role: "user", content: fixPrompt }],
       max_tokens: 4000
     });
